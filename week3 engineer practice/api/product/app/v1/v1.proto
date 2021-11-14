@@ -1,0 +1,16 @@
+syntax="proto3";
+
+package product.app.v1;
+
+option go_package="github.com/wudiiv11/GoAdvanceCamp/week3 engineer practice/api/product/app/v1";
+
+service BlogServer {
+  rpc CreateArticle(CreateArticleReq) returns (CreateArticleResponse) {}
+}
+
+message CreateArticleReq {
+  string title = 1;
+  string content = 2;
+}
+
+message CreateArticleResponse {}
