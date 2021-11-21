@@ -43,6 +43,12 @@ type MetricsConfig struct {
 	bucketNum            int64
 }
 
+type MetricResult struct {
+	success   int64
+	timeouts  int64
+	fallbacks int64
+}
+
 func NewMetrics(config MetricsConfig) *Metrics {
 	bucketWindow := config.bucketWindowInSecond
 	if bucketWindow != 0 {
@@ -79,18 +85,22 @@ func (m *Metrics) loop() {
 		}
 
 		if m.shift+m.bucketNum-1 < shift {
-			m.mutex.Lock()
-			for ; m.shift+m.bucketNum-1 < shift; m.shift++ {
-				idx := m.shift % m.bucketWindowInSecond
+			for !m.isValidShift(m.shift) {
+				m.mutex.Lock()
+
+				idx := m.shift % m.bucketNum
 				m.successes[idx] = 0
 				m.timeouts[idx] = 0
 				m.fallbacks[idx] = 0
+				m.shift++
+
+				m.mutex.Unlock()
 			}
-			m.mutex.Unlock()
+
 		}
 
 		m.mutex.Lock()
-		idx := event.Start.Unix() % m.bucketWindowInSecond
+		idx := event.Start.Unix() % m.bucketNum
 		switch event.EventType {
 		case EventSuccess:
 			m.successes[idx]++
@@ -101,6 +111,31 @@ func (m *Metrics) loop() {
 		}
 		m.mutex.Unlock()
 	}
+}
+
+func (m *Metrics) isValidShift(shift int64) bool {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	return shift > m.shift && shift <= m.shift+m.bucketNum-1
+}
+
+func (m *Metrics) Sum(t time.Time) *MetricResult {
+	res := &MetricResult{}
+	shift := t.Unix() / m.bucketWindowInSecond
+
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+
+	for m.isValidShift(shift) {
+		idx := shift % m.bucketNum
+		res.fallbacks += m.fallbacks[idx]
+		res.success += m.successes[idx]
+		res.timeouts += m.timeouts[idx]
+		shift++
+	}
+
+	return res
 }
 
 func (m *Metrics) ReportEvent(t EventType, start time.Time) error {
